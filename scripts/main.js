@@ -18,6 +18,9 @@ const BLOOD_COLORS = {
 // Tracks active effects: tokenId → { container, mesh, tick }
 const activeEffects = new Map();
 
+// [EXPERIMENTAL] Tracks death blood pools: tokenId → { container, fadeTimeout }
+const activeDeathPools = new Map();
+
 // ── Settings ───────────────────────────────────────────────────────────────────
 
 Hooks.once('init', () => {
@@ -243,6 +246,26 @@ Hooks.once('init', () => {
     default: true,
     onChange: refreshAllEffects,
   });
+
+  // ── [EXPERIMENTAL] Death Blood Pool ─────────────────────────────────────────
+  game.settings.register(MODULE_ID, 'deathEffect', {
+    name: '[EXPERIMENTAL] Death Blood Pool',
+    hint: 'When a token drops to 0 HP, a blood burst and spreading pool appear at their location. The pool fades after 30 seconds. Wall-aware — blood will not pass through walls.',
+    scope: 'world',
+    config: true,
+    type: Boolean,
+    default: false,
+  });
+
+  game.settings.register(MODULE_ID, 'deathPoolMax', {
+    name: '[EXPERIMENTAL] Max Concurrent Death Pools',
+    hint: 'Maximum number of death pools allowed at once. Set to 0 to disable the pool entirely (the burst will still play if the Death Blood Pool setting is on).',
+    scope: 'world',
+    config: true,
+    type: Number,
+    range: { min: 0, max: 10, step: 1 },
+    default: 3,
+  });
 });
 
 // ── Quality preset application ─────────────────────────────────────────────────
@@ -351,6 +374,10 @@ Hooks.on('canvasReady', () => {
     // blood-drip effects from the previous session before we re-apply fresh ones.
     Sequencer.EffectManager.endEffects({ origin: MODULE_ID });
   }
+  // Clear any death pools from the previous scene — they are PIXI-only and
+  // do not survive a canvas reload, so we wipe the tracking map and let
+  // timeouts/ticks expire naturally.
+  clearAllDeathPools();
   // Small delay so token meshes are fully initialized before we try to attach
   // PIXI containers or Sequencer effects to them.
   setTimeout(refreshAllEffects, 500);
@@ -370,6 +397,9 @@ Hooks.on('updateActor', (actor, changes) => {
 
   for (const token of tokens) {
     const wasActive = activeEffects.has(token.id);
+
+    // [EXPERIMENTAL] Trigger death pool when HP hits exactly 0.
+    if (newHp === 0) triggerDeathEffect(token);
 
     if (crossingThreshold) {
       startBloodDrip(token);
@@ -442,6 +472,8 @@ Hooks.on('refreshToken', (token) => {
 
 Hooks.on('deleteToken', (tokenDoc) => {
   stopBloodDrip(tokenDoc.id);
+  // Free the death pool slot — the pool itself stays on canvas and fades naturally.
+  activeDeathPools.delete(tokenDoc.id);
 });
 
 // ── Core ───────────────────────────────────────────────────────────────────────
@@ -821,5 +853,255 @@ function spawnDrop(container, radius, texSize, colors, slow = false, angleMin = 
 
   container.addChild(g);
   return g;
+}
+
+// ── [EXPERIMENTAL] Death Blood Pool ───────────────────────────────────────────
+
+function triggerDeathEffect(token) {
+  if (!(game.settings.get(MODULE_ID, 'deathEffect') ?? false)) return;
+  const maxPools = game.settings.get(MODULE_ID, 'deathPoolMax') ?? 3;
+  if (activeDeathPools.has(token.id)) return;
+
+  // Impact animation always plays; pool is skipped if cap is 0 or reached.
+  buildDeathSplat(token, maxPools > 0 && activeDeathPools.size < maxPools);
+}
+
+/**
+ * Plays a radial impact animation then, if showPool, grows an organic blood pool
+ * over 30 s (wall-aware via mask). When spreading finishes the fresh pool fades
+ * over 4 s and a dry dark stain is left for 60 more seconds before fading out.
+ */
+function buildDeathSplat(token, showPool) {
+  const colors   = getColors();
+  const gridSize = canvas.grid.size;
+  const cx       = token.x + token.w / 2;
+  const cy       = token.y + token.h / 2;
+  const maxR     = gridSize * 1.5;
+
+  const container = new PIXI.Container();
+  container.position.set(cx, cy);
+  canvas.tokens.addChildAt(container, 0);
+
+  // ── Impact animation ────────────────────────────────────────────────────────
+  playImpactAnimation(container, gridSize, colors);
+
+  if (!showPool) return;
+
+  // ── Wall mask ───────────────────────────────────────────────────────────────
+  try {
+    const poly = ClockwiseSweepPolygon.create({ x: cx, y: cy }, {
+      radius: maxR,
+      type:   'move',
+    });
+    if (poly?.points?.length >= 6) {
+      const maskGfx = new PIXI.Graphics();
+      maskGfx.beginFill(0xFFFFFF, 1);
+      maskGfx.moveTo(poly.points[0] - cx, poly.points[1] - cy);
+      for (let i = 2; i < poly.points.length; i += 2) {
+        maskGfx.lineTo(poly.points[i] - cx, poly.points[i + 1] - cy);
+      }
+      maskGfx.closePath();
+      maskGfx.endFill();
+      container.addChild(maskGfx);
+      container.mask = maskGfx;
+    }
+  } catch (e) {
+    console.warn(`${MODULE_ID} | Wall polygon failed — no mask applied`, e);
+  }
+
+  // ── Irregular arms ──────────────────────────────────────────────────────────
+  const NUM_ARMS  = 36;
+  const SPREAD_MS = 30_000;
+  const arms      = Array.from({ length: NUM_ARMS }, (_, i) => ({
+    angle:    (i / NUM_ARMS) * Math.PI * 2,
+    targetR:  maxR * (0.55 + Math.random() * 0.45),
+    growRate: 0.35 + Math.random() * 0.65,
+    currentR: 0,
+  }));
+
+  const poolGfx   = new PIXI.Graphics();
+  container.addChild(poolGfx);
+
+  const startTime = performance.now();
+  let spreading   = true;
+
+  const spreadTick = () => {
+    if (container.destroyed) { canvas.app.ticker.remove(spreadTick); return; }
+
+    const elapsed      = performance.now() - startTime;
+    const baseProgress = Math.min(1, elapsed / SPREAD_MS);
+    let   allDone      = true;
+
+    for (const arm of arms) {
+      const p = Math.min(1, baseProgress * arm.growRate * 1.8);
+      arm.currentR = arm.targetR * deathEaseOut(p);
+      if (p < 1) allDone = false;
+    }
+
+    drawBloodBlob(poolGfx, arms, colors.primary, 0.38);
+
+    if (allDone && spreading) {
+      spreading = false;
+      canvas.app.ticker.remove(spreadTick);
+      beginDryPhase(container, arms, colors, poolGfx, token.id);
+    }
+  };
+  canvas.app.ticker.add(spreadTick);
+
+  // Safety net in case allDone never fires.
+  const fadeTimeout = setTimeout(() => {
+    if (spreading) { canvas.app.ticker.remove(spreadTick); spreading = false; }
+    beginDryPhase(container, arms, colors, poolGfx, token.id);
+  }, SPREAD_MS + 2_000);
+
+  activeDeathPools.set(token.id, { container, fadeTimeout });
+}
+
+/**
+ * Plays a one-shot radial impact: thin spike triangles + scattered droplets,
+ * fading out over ~1.5 s. Replaces the old expanding-circle burst.
+ */
+function playImpactAnimation(container, gridSize, colors) {
+  const impactGfx  = new PIXI.Graphics();
+  const NUM_SPIKES = 16;
+  const NUM_DROPS  = 14;
+
+  // Radial spikes — thin triangles pointing outward.
+  impactGfx.beginFill(colors.primary, 0.92);
+  for (let i = 0; i < NUM_SPIKES; i++) {
+    const angle  = (i / NUM_SPIKES) * Math.PI * 2 + (Math.random() - 0.5) * 0.45;
+    const length = gridSize * (0.35 + Math.random() * 0.75);
+    const half   = gridSize * 0.055;
+    const ex     = length * Math.cos(angle);
+    const ey     = length * Math.sin(angle);
+    const lx     =  half  * Math.cos(angle + Math.PI / 2);
+    const ly     =  half  * Math.sin(angle + Math.PI / 2);
+    impactGfx.moveTo( lx,  ly);
+    impactGfx.lineTo(ex, ey);
+    impactGfx.lineTo(-lx, -ly);
+    impactGfx.closePath();
+  }
+  impactGfx.endFill();
+
+  // Scattered droplets around the impact point.
+  for (let i = 0; i < NUM_DROPS; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist  = gridSize * (0.15 + Math.random() * 0.9);
+    const r     = gridSize * (0.03 + Math.random() * 0.06);
+    impactGfx.beginFill(colors.primary, 0.7 + Math.random() * 0.3);
+    impactGfx.drawCircle(
+      dist * Math.cos(angle),
+      dist * Math.sin(angle),
+      r,
+    );
+    impactGfx.endFill();
+  }
+
+  container.addChild(impactGfx);
+
+  const IMPACT_MS  = 1_500;
+  const impactStart = performance.now();
+  const impactTick  = () => {
+    if (impactGfx.destroyed) { canvas.app.ticker.remove(impactTick); return; }
+    const t = (performance.now() - impactStart) / IMPACT_MS;
+    impactGfx.alpha = Math.max(0, 1 - t);
+    if (t >= 1) {
+      canvas.app.ticker.remove(impactTick);
+      if (!container.destroyed) { container.removeChild(impactGfx); impactGfx.destroy(); }
+    }
+  };
+  canvas.app.ticker.add(impactTick);
+}
+
+/** Draws a smooth organic blob through the arm tips using quadratic bezier curves. */
+function drawBloodBlob(gfx, arms, color, alpha) {
+  const pts = arms.map(a => ({
+    x: a.currentR * Math.cos(a.angle),
+    y: a.currentR * Math.sin(a.angle),
+  }));
+  const n = pts.length;
+
+  gfx.clear();
+  gfx.beginFill(color, alpha);
+  gfx.moveTo((pts[n - 1].x + pts[0].x) / 2, (pts[n - 1].y + pts[0].y) / 2);
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[i];
+    const p1 = pts[(i + 1) % n];
+    gfx.quadraticCurveTo(p0.x, p0.y, (p0.x + p1.x) / 2, (p0.y + p1.y) / 2);
+  }
+  gfx.closePath();
+  gfx.endFill();
+}
+
+/**
+ * Called when spreading finishes. Fades the fresh pool over 4 s while drawing a
+ * darker dry stain at the same shape. The dry stain lingers for 60 s then fades.
+ */
+function beginDryPhase(container, arms, colors, poolGfx, tokenId) {
+  const POOL_FADE_MS = 4_000;
+  const DRY_LINGER_MS = 60_000;
+  const DRY_FADE_MS  = 4_000;
+
+  // Draw the dry stain immediately at the final arm positions.
+  const dryGfx = new PIXI.Graphics();
+  container.addChildAt(dryGfx, 0); // below the fresh pool
+  drawBloodBlob(dryGfx, arms, colors.secondary, 0.25);
+
+  // Fade fresh pool.
+  const poolStart = performance.now();
+  const poolFadeTick = () => {
+    if (poolGfx.destroyed) { canvas.app.ticker.remove(poolFadeTick); return; }
+    const t = (performance.now() - poolStart) / POOL_FADE_MS;
+    poolGfx.alpha = Math.max(0, 1 - t);
+    if (t >= 1) {
+      canvas.app.ticker.remove(poolFadeTick);
+      if (!poolGfx.destroyed) { container.removeChild(poolGfx); poolGfx.destroy(); }
+    }
+  };
+  canvas.app.ticker.add(poolFadeTick);
+
+  // After dry stain lingers, fade container and destroy.
+  const dryTimeout = setTimeout(() => {
+    if (container.destroyed) return;
+    const dryStart    = performance.now();
+    const dryFadeTick = () => {
+      if (container.destroyed) { canvas.app.ticker.remove(dryFadeTick); return; }
+      const t = (performance.now() - dryStart) / DRY_FADE_MS;
+      container.alpha = Math.max(0, 1 - t);
+      if (t >= 1) {
+        canvas.app.ticker.remove(dryFadeTick);
+        try {
+          if (!container.destroyed) {
+            canvas.tokens.removeChild(container);
+            container.destroy({ children: true });
+          }
+        } catch (_) {}
+        activeDeathPools.delete(tokenId);
+      }
+    };
+    canvas.app.ticker.add(dryFadeTick);
+  }, DRY_LINGER_MS);
+
+  // Update the pool entry so clearAllDeathPools can cancel the dry timeout too.
+  const entry = activeDeathPools.get(tokenId);
+  if (entry) {
+    clearTimeout(entry.fadeTimeout);
+    entry.fadeTimeout = dryTimeout;
+  }
+}
+
+
+/** Ease-out curve used by the death pool spread animation. */
+function deathEaseOut(t) {
+  return 1 - Math.pow(1 - t, 2.2);
+}
+
+/** Wipes all tracked death pools (called on canvas reload). */
+function clearAllDeathPools() {
+  for (const [, pool] of activeDeathPools) {
+    clearTimeout(pool.fadeTimeout);
+    try { if (!pool.container.destroyed) pool.container.destroy({ children: true }); } catch (_) {}
+  }
+  activeDeathPools.clear();
 }
 

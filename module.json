@@ -22,12 +22,6 @@
         "id": "pf2e",
         "type": "system"
       }
-    ],
-    "recommends": [
-      {
-        "id": "sequencer",
-        "type": "module"
-      }
     ]
   }
 }
