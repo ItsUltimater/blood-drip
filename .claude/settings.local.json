@@ -8,7 +8,9 @@
       "WebFetch(domain:fantasycomputer.works)",
       "WebFetch(domain:library.jb2a.com)",
       "WebFetch(domain:foundryvtt.wiki)",
-      "Bash(gh auth:*)"
+      "Bash(gh auth:*)",
+      "Bash(cmd /c rmdir \"C:\\\\Users\\\\Ethan\\\\AppData\\\\Local\\\\FoundryVTT\\\\Data\\\\modules\\\\blood-drip\")",
+      "Bash(cmd /c mklink /D \"C:\\\\Users\\\\Ethan\\\\AppData\\\\Local\\\\FoundryVTT\\\\Data\\\\modules\\\\blood-drip\" \"C:\\\\Users\\\\Ethan\\\\Desktop\\\\Claude Projects\\\\ClaudeCodeTests\")"
     ]
   }
 }
