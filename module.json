@@ -1,0 +1,34 @@
+{
+  "id": "blood-drip",
+  "title": "Blood Drip",
+  "description": "Displays an animated blood dripping effect on tokens that fall below a configurable HP threshold. Supports custom PIXI styles and JB2A animations via Sequencer.",
+  "version": "1.0.0",
+  "authors": [
+    {
+      "name": "Ethan"
+    }
+  ],
+  "compatibility": {
+    "minimum": "11",
+    "verified": "13"
+  },
+  "esmodules": ["scripts/main.js"],
+  "relationships": {
+    "systems": [
+      {
+        "id": "pf2e",
+        "type": "system"
+      }
+    ],
+    "recommends": [
+      {
+        "id": "sequencer",
+        "type": "module"
+      },
+      {
+        "id": "JB2A_DnD5e",
+        "type": "module"
+      }
+    ]
+  }
+}

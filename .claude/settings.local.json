@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:jules-bens-aa.github.io)",
+      "WebFetch(domain:foundryvtt.com)",
+      "WebFetch(domain:fantasycomputer.works)",
+      "WebFetch(domain:library.jb2a.com)",
+      "WebFetch(domain:foundryvtt.wiki)"
+    ]
+  }
+}
