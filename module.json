@@ -8,9 +8,9 @@
       "name": "ItsUltimater"
     }
   ],
-  "url": "https://github.com/ItsUltimater/blood-drip-",
-  "manifest": "https://raw.githubusercontent.com/ItsUltimater/blood-drip-/main/module.json",
-  "download": "https://github.com/ItsUltimater/blood-drip-/releases/download/v1.0.0/blood-drip.zip",
+  "url": "https://github.com/ItsUltimater/blood-drip",
+  "manifest": "https://raw.githubusercontent.com/ItsUltimater/blood-drip/main/module.json",
+  "download": "https://github.com/ItsUltimater/blood-drip/releases/download/v1.0.0/blood-drip.zip",
   "compatibility": {
     "minimum": "11",
     "verified": "13"

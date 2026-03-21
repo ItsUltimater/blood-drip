@@ -46,7 +46,7 @@ A Foundry VTT module for **Pathfinder 2e** that displays animated blood effects 
 2. In Foundry VTT, go to **Add-on Modules → Install Module**
 3. Click **Install** at the bottom and paste the manifest URL:
    ```
-   https://raw.githubusercontent.com/ItsUltimater/blood-drip-/main/module.json
+   https://raw.githubusercontent.com/ItsUltimater/blood-drip/main/module.json
    ```
 
 ### Via Foundry Package Manager
