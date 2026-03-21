@@ -7,7 +7,8 @@
       "WebFetch(domain:foundryvtt.com)",
       "WebFetch(domain:fantasycomputer.works)",
       "WebFetch(domain:library.jb2a.com)",
-      "WebFetch(domain:foundryvtt.wiki)"
+      "WebFetch(domain:foundryvtt.wiki)",
+      "Bash(gh auth:*)"
     ]
   }
 }
