@@ -35,7 +35,7 @@ A Foundry VTT module for **Pathfinder 2e** that displays animated blood effects 
 
 ### Optional (for JB2A style)
 - [Sequencer](https://foundryvtt.com/packages/sequencer)
-- JB2A Patreon Complete Collection or [JB2A Free](https://foundryvtt.com/packages/JB2A_DnD5e)
+- [JB2A Free](https://foundryvtt.com/packages/JB2A_DnD5e)
 
 ---
 
@@ -86,7 +86,7 @@ Created by **ItsUltimater**
 
 Inspired by the [Splatter](https://foundryvtt.com/packages/splatter) module by TheRipper93.
 
-Optional animations provided by [JB2A](https://www.patreon.com/JB2A) via the [Sequencer](https://foundryvtt.com/packages/sequencer) module.
+Optional animations provided by [JB2A Free](https://foundryvtt.com/packages/JB2A_DnD5e) via the [Sequencer](https://foundryvtt.com/packages/sequencer) module.
 
 ---
 
