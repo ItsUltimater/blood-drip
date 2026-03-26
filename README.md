@@ -10,6 +10,7 @@ A Foundry VTT module for **Pathfinder 2e** that displays animated blood effects 
 ## Features
 
 - **Animated blood effects** appear automatically when a token's HP drops below a configurable threshold (default 25%)
+- **PF2e Bleed condition support** — the effect also triggers when a token has an active persistent bleed damage condition, independent of HP
 - **Multiple visual styles** to choose from:
   - 🟢 Dripping Drops — teardrop beads along the full token border
   - 🟢 Dripping Drops (no border) — same drops without the circular ring
@@ -25,6 +26,8 @@ A Foundry VTT module for **Pathfinder 2e** that displays animated blood effects 
 - **Liquid Filters** — GPU blur and displacement filters for an organic, liquid look
 - **Performance presets** — Low, Medium, and High to suit any computer
 - **Drop Count and Speed** controls for fine-tuning performance vs. visual density
+- **[EXPERIMENTAL] Death Blood Pool** — on token death, plays a radial impact burst followed by an organic blood pool that spreads over 30 seconds, respecting walls, then fades to a dry blood stain that lingers for 1 minute
+- **[EXPERIMENTAL] Max Concurrent Death Pools** — cap how many death pools can exist at once (0 = disabled)
 
 ---
 
@@ -77,6 +80,9 @@ Search for **Blood Drip** in the Foundry VTT module browser.
 | JB2A Animation Scale | Size of the JB2A animation relative to the token | 2.0 |
 | JB2A Animation Opacity | Transparency of the JB2A animation | 0.85 |
 | GM Only (JB2A) | Only the GM sees the JB2A effect | Off |
+| Bleed Condition Trigger | Also trigger on PF2e persistent bleed damage condition | On |
+| [EXPERIMENTAL] Death Blood Pool | Play impact burst and spreading blood pool on token death | Off |
+| [EXPERIMENTAL] Max Concurrent Death Pools | Maximum simultaneous death pools (0 = disabled) | 3 |
 
 ---
 
