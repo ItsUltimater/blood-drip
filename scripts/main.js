@@ -6,6 +6,16 @@
 
 const MODULE_ID = 'blood-drip';
 
+// ── Changelog (add a new entry here with each version update) ──────────────────
+const CHANGELOG = {
+  '1.0.0': [
+    'Initial release — animated blood drip effect on tokens below HP threshold.',
+    'Supports PIXI teardrop, liquid border, and JB2A/Sequencer animation styles.',
+    'Configurable blood color, drop count, chat alerts, and sound effects.',
+    'Quality presets for performance tuning.',
+  ],
+};
+
 // ── Colour palettes ────────────────────────────────────────────────────────────
 const BLOOD_COLORS = {
   dark:   { primary: 0x8B0000, secondary: 0x6B0000 },
@@ -257,6 +267,15 @@ Hooks.once('init', () => {
     default: false,
   });
 
+  game.settings.register(MODULE_ID, 'bleedCondition', {
+    name: 'Trigger on Bleed Condition (PF2e)',
+    hint: 'Also start the blood effect when a token gains the Bleed persistent damage condition, regardless of HP threshold.',
+    scope: 'world',
+    config: true,
+    type: Boolean,
+    default: true,
+  });
+
   game.settings.register(MODULE_ID, 'deathPoolMax', {
     name: '[EXPERIMENTAL] Max Concurrent Death Pools',
     hint: 'Maximum number of death pools allowed at once. Set to 0 to disable the pool entirely (the burst will still play if the Death Blood Pool setting is on).',
@@ -266,6 +285,37 @@ Hooks.once('init', () => {
     range: { min: 0, max: 10, step: 1 },
     default: 3,
   });
+
+  // Hidden client setting to track the last version the user has seen the changelog for.
+  game.settings.register(MODULE_ID, 'lastSeenVersion', {
+    scope: 'client',
+    config: false,
+    type: String,
+    default: '',
+  });
+});
+
+// ── Update notification ────────────────────────────────────────────────────────
+Hooks.once('ready', () => {
+  if (!game.user.isGM) return;
+
+  const currentVersion = game.modules.get(MODULE_ID)?.version ?? '';
+  const lastSeen       = game.settings.get(MODULE_ID, 'lastSeenVersion');
+  if (!currentVersion || currentVersion === lastSeen) return;
+
+  const notes = CHANGELOG[currentVersion];
+  const body  = notes
+    ? `<ul>${notes.map(n => `<li>${n}</li>`).join('')}</ul>`
+    : '<p>Various improvements and bug fixes.</p>';
+
+  new Dialog({
+    title: `Blood Drip — Updated to v${currentVersion}`,
+    content: `<h3>What's new</h3>${body}`,
+    buttons: {
+      ok: { label: 'Got it', callback: () => game.settings.set(MODULE_ID, 'lastSeenVersion', currentVersion) },
+    },
+    default: 'ok',
+  }).render(true);
 });
 
 // ── Quality preset application ─────────────────────────────────────────────────
@@ -411,7 +461,7 @@ Hooks.on('updateActor', (actor, changes) => {
           || (alertFilter === 'npc' && actor.type === 'npc');
 
         if (passesAlert) {
-          if (game.settings.get(MODULE_ID, 'chatAlert')) {
+          if (game.settings.get(MODULE_ID, 'chatAlert') && game.user.isGM) {
             const template = game.settings.get(MODULE_ID, 'chatText') || '⚠ {name} is critically wounded and bleeding!';
             const content  = template.replace(/\{name\}/g, actor.name);
             ChatMessage.create({
@@ -420,7 +470,7 @@ Hooks.on('updateActor', (actor, changes) => {
             });
           }
           const soundSrc = game.settings.get(MODULE_ID, 'soundPath')?.trim();
-          if (soundSrc) {
+          if (soundSrc && game.user.isGM) {
             AudioHelper.play({
               src:      soundSrc,
               volume:   game.settings.get(MODULE_ID, 'soundVolume') ?? 0.8,
@@ -434,6 +484,51 @@ Hooks.on('updateActor', (actor, changes) => {
       stopBloodDrip(token.id);
     }
   }
+});
+
+// ── PF2e bleed condition hooks ─────────────────────────────────────────────────
+
+/**
+ * Returns true if the actor currently has an active Bleed persistent damage condition.
+ */
+function actorHasBleed(actor) {
+  return actor?.itemTypes?.condition?.some(
+    c => c.slug === 'persistent-damage' && c.system?.persistent?.damageType === 'bleed'
+  ) ?? false;
+}
+
+/**
+ * When a condition item is added, check if it's a bleed condition and start the effect.
+ */
+Hooks.on('createItem', (item, _options, _userId) => {
+  if (!game.settings.get(MODULE_ID, 'bleedCondition')) return;
+  if (item.type !== 'condition') return;
+  if (item.slug !== 'persistent-damage' || item.system?.persistent?.damageType !== 'bleed') return;
+
+  const actor = item.parent;
+  if (!actor || !actorPassesFilter(actor)) return;
+
+  const tokens = canvas.tokens?.placeables?.filter(t => t.actor?.id === actor.id) ?? [];
+  for (const token of tokens) startBloodDrip(token);
+});
+
+/**
+ * When a condition item is removed, stop the effect only if HP is also above threshold.
+ */
+Hooks.on('deleteItem', (item, _options, _userId) => {
+  if (!game.settings.get(MODULE_ID, 'bleedCondition')) return;
+  if (item.type !== 'condition') return;
+  if (item.slug !== 'persistent-damage' || item.system?.persistent?.damageType !== 'bleed') return;
+
+  const actor = item.parent;
+  if (!actor) return;
+
+  const hp = actor.system?.attributes?.hp;
+  const aboveThreshold = !hp?.max || (hp.value / hp.max > getThreshold());
+  if (!aboveThreshold) return; // HP still low — keep the effect running
+
+  const tokens = canvas.tokens?.placeables?.filter(t => t.actor?.id === actor.id) ?? [];
+  for (const token of tokens) stopBloodDrip(token.id);
 });
 
 Hooks.on('drawToken', (token) => {
@@ -450,9 +545,9 @@ Hooks.on('drawToken', (token) => {
   const hp = actor.system?.attributes?.hp;
   if (!hp?.max) return;
 
-  if (hp.value / hp.max <= getThreshold() && hp.value > 0) {
-    startBloodDrip(token);
-  }
+  const belowThreshold = hp.value / hp.max <= getThreshold() && hp.value > 0;
+  const hasBleed = game.settings.get(MODULE_ID, 'bleedCondition') && actorHasBleed(actor);
+  if (belowThreshold || hasBleed) startBloodDrip(token);
 });
 
 Hooks.on('refreshToken', (token) => {
@@ -594,7 +689,9 @@ function refreshAllEffects() {
     if (!actor || !actorPassesFilter(actor)) continue;
     const hp = actor.system?.attributes?.hp;
     if (!hp?.max) continue;
-    if (hp.value / hp.max <= getThreshold() && hp.value > 0) startBloodDrip(token);
+    const belowThreshold = hp.value / hp.max <= getThreshold() && hp.value > 0;
+    const hasBleed = game.settings.get(MODULE_ID, 'bleedCondition') && actorHasBleed(actor);
+    if (belowThreshold || hasBleed) startBloodDrip(token);
   }
 }
 
